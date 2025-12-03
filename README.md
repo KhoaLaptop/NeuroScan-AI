@@ -20,12 +20,16 @@ The model classifies MRI scans into the following 10 categories:
 ## 🖼️ Input Image Guidelines
 To ensure accurate predictions, input images should ideally match the characteristics of the training data:
 
-| Pathology | Recommended MRI Type | Recommended View (Orientation) |
-|-----------|----------------------|--------------------------------|
+| Class | Recommended MRI Type | Recommended View (Orientation) |
+|-------|----------------------|--------------------------------|
 | **Pituitary Tumor** | **T1-weighted (Contrast)** | **Coronal** or **Sagittal** (Best for sella turcica) |
-| **Meningioma / Glioma** | **T1 (Contrast) or T2** | **Axial** (Standard) or Coronal |
-| **Alzheimer's** | **T1-weighted** | **Axial** (Best for hippocampal atrophy) |
-| **Stroke** | **DWI** or **FLAIR** | **Axial** (Standard for ischemia) |
+| **Meningioma** | **T1 (Contrast) or T2** | **Axial** or Coronal |
+| **Glioma** | **T1 (Contrast) or T2** | **Axial** or Coronal |
+| **Mild / Moderate / Very Mild Demented** | **T1-weighted** | **Axial** (Focus on hippocampal atrophy) |
+| **Non Demented** | **T1-weighted** | **Axial** |
+| **Haemorrhagic Stroke** | **CT** or **MRI (DWI/FLAIR)** | **Axial** |
+| **Ischemic Stroke** | **DWI** or **FLAIR** | **Axial** |
+| **Normal** | Any of the above | Any standard medical view |
 
 > **Note:** The model may perform poorly on images with different sequences (e.g., raw T1 without contrast for tumors) or unusual artifacts. Ensure images are cropped to remove skull/background if possible for best results.
 
