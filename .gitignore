@@ -4,7 +4,6 @@ brain_tumor_dataset_3/
 Stroke_classification/
 
 # Models
-*.pth
 *.pt
 
 # Python
