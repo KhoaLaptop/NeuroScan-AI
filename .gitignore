@@ -1,0 +1,17 @@
+# Data
+data/
+brain_tumor_dataset_3/
+Stroke_classification/
+
+# Models
+*.pth
+*.pt
+
+# Python
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.DS_Store
+.env
+venv/
+.gemini/
