@@ -2,9 +2,19 @@
 data/
 brain_tumor_dataset_3/
 Stroke_classification/
+# Radiopaedia cases: CC BY-NC-SA, not ours to redistribute
+Tumor Dataset/
+Axial_T1/
+Sagittal_T1/
+graphify-out/
 
 # Models
 *.pt
+*.pth
+
+# Generated results
+/*.csv
+confusion_matrix_*.png
 
 # Python
 __pycache__/

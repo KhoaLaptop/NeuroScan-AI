@@ -4,7 +4,7 @@ from sklearn.metrics import classification_report, confusion_matrix
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-def evaluate_model(model, dataloader, device, class_names):
+def evaluate_model(model, dataloader, device, class_names, output_path='confusion_matrix.png'):
     model.eval()
     all_preds = []
     all_labels = []
@@ -29,5 +29,5 @@ def evaluate_model(model, dataloader, device, class_names):
     plt.xlabel('Predicted')
     plt.ylabel('True')
     plt.title('Confusion Matrix')
-    plt.savefig('confusion_matrix.png')
-    print("Confusion matrix saved to confusion_matrix.png")
+    plt.savefig(output_path)
+    print(f"Confusion matrix saved to {output_path}")

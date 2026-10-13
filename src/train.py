@@ -4,7 +4,7 @@ import time
 import copy
 from tqdm import tqdm
 
-def train_model(model, dataloaders, criterion, optimizer, device, num_epochs=25):
+def train_model(model, dataloaders, criterion, optimizer, device, num_epochs=25, checkpoint_path='best_model.pth'):
     since = time.time()
 
     val_acc_history = []
@@ -59,7 +59,7 @@ def train_model(model, dataloaders, criterion, optimizer, device, num_epochs=25)
             if phase == 'val' and epoch_acc > best_acc:
                 best_acc = epoch_acc
                 best_model_wts = copy.deepcopy(model.state_dict())
-                torch.save(model.state_dict(), 'best_model.pth')
+                torch.save(model.state_dict(), checkpoint_path)
                 print(f"Saved new best model with accuracy: {best_acc:.4f}")
             
             if phase == 'val':

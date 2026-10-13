@@ -6,24 +6,23 @@ from torchvision import transforms
 # Add src to path
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
+import pytest
+
+from main import TASK_ROOT_DIRS
 from src.dataset import UnifiedDataset
 
-def test_dataset():
-    root_dirs = [
-        '/Users/khoapc/Documents/Project Brain Classifier/data/train',
-        '/Users/khoapc/Documents/Project Brain Classifier/data/val',
-        '/Users/khoapc/Documents/Project Brain Classifier/brain_tumor_dataset_3',
-        '/Users/khoapc/Documents/Project Brain Classifier/Stroke_classification'
-    ]
+@pytest.mark.parametrize('task', ['detection', 'subtype'])
+def test_dataset(task):
+    root_dirs = TASK_ROOT_DIRS[task]
 
     transform = transforms.Compose([
         transforms.Resize((224, 224)),
         transforms.ToTensor()
     ])
 
-    print("Initializing UnifiedDataset...")
-    dataset = UnifiedDataset(root_dirs=root_dirs, transform=transform, split='train')
-    
+    print(f"Initializing UnifiedDataset for task '{task}'...")
+    dataset = UnifiedDataset(root_dirs=root_dirs, transform=transform, split='train', task=task)
+
     print(f"Dataset size: {len(dataset)}")
     print(f"Classes: {dataset.class_to_idx}")
 
@@ -40,10 +39,14 @@ def test_dataset():
         if count == 0:
             print(f"WARNING: No samples found for class {cls}!")
 
+    assert all(count > 0 for count in class_counts.values()), f"Empty class in {class_counts}"
+
     # Test getitem
     img, label = dataset[0]
     print(f"\nSample image shape: {img.shape}")
     print(f"Sample label: {label}")
 
+
 if __name__ == "__main__":
-    test_dataset()
+    for t in ['detection', 'subtype']:
+        test_dataset(t)

@@ -5,44 +5,54 @@ from PIL import Image
 from sklearn.model_selection import train_test_split
 import glob
 
+# Each task draws every one of its classes from a single source dataset, so that
+# source cannot predict label. Mixing sources across classes lets the network
+# separate them by acquisition artefacts (resolution, framing) instead of anatomy.
+TASKS = {
+    'detection': {
+        'class_to_idx': {'Normal': 0, 'tumor': 1},
+        'aliases': {'no': 'Normal', 'yes': 'tumor'},
+    },
+    'subtype': {
+        'class_to_idx': {'meningioma': 0, 'glioma': 1, 'pituitary tumor': 2},
+        'aliases': {'pituitary': 'pituitary tumor'},
+    },
+}
+
+
 class UnifiedDataset(Dataset):
-    def __init__(self, root_dirs, transform=None, split='train', val_split=0.15, test_split=0.15, seed=42):
+    def __init__(self, root_dirs, transform=None, split='train', task='detection',
+                 val_split=0.15, test_split=0.15, seed=42):
         """
         Args:
             root_dirs (list): List of root directories containing class folders.
             transform (callable, optional): Optional transform to be applied on a sample.
             split (str): 'train', 'val', or 'test'.
+            task (str): Which task's class mapping to use, see TASKS.
             val_split (float): Fraction of data to use for validation.
             test_split (float): Fraction of data to use for testing.
             seed (int): Random seed for splitting.
         """
+        if task not in TASKS:
+            raise ValueError(f"Invalid task: {task}. Must be one of {list(TASKS)}.")
+
         self.transform = transform
         self.split = split
+        self.task = task
         self.image_paths = []
         self.labels = []
-        
-        # Define class mapping
-        self.class_to_idx = {
-            'meningioma': 0,
-            'glioma': 1,
-            'pituitary tumor': 2,
-            'MildDemented': 3,
-            'ModerateDemented': 4,
-            'NonDemented': 5,
-            'VeryMildDemented': 6,
-            'Haemorrhagic': 7,
-            'Ischemic': 8,
-            'Normal': 9
-        }
+
+        self.class_to_idx = TASKS[task]['class_to_idx']
         self.idx_to_class = {v: k for k, v in self.class_to_idx.items()}
+        aliases = TASKS[task]['aliases']
 
         all_images = []
         all_labels = []
 
-        # Helper to normalize class names (handle spaces, etc.)
+        # Helper to normalize class names (handle spaces, aliases, etc.)
         def normalize_class_name(name):
             name = name.strip()
-            return name
+            return aliases.get(name, name)
 
         for root_dir in root_dirs:
             if not os.path.exists(root_dir):

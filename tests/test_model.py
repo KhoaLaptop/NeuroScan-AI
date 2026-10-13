@@ -9,7 +9,7 @@ from src.model import get_model
 
 def test_model():
     print("Initializing Model...")
-    model = get_model(num_classes=10, pretrained=False) # No need to download weights for shape check
+    model = get_model(num_classes=3, pretrained=False) # No need to download weights for shape check
     
     print("Model initialized.")
     
@@ -24,7 +24,7 @@ def test_model():
     
     print(f"Output shape: {output.shape}")
     
-    assert output.shape == (batch_size, 10), f"Expected output shape {(batch_size, 10)}, got {output.shape}"
+    assert output.shape == (batch_size, 3), f"Expected output shape {(batch_size, 3)}, got {output.shape}"
     print("Test passed!")
 
 if __name__ == "__main__":

@@ -1,111 +1,196 @@
-# NeuroScan AI: Advanced Brain Pathology Classification
+# NeuroScan AI: Brain Tumor Classification from MRI
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.12-blue.svg)
 ![PyTorch](https://img.shields.io/badge/PyTorch-2.0%2B-ee4c2c.svg)
-![Accuracy](https://img.shields.io/badge/Accuracy-98%25-brightgreen.svg)
 
-**NeuroScan AI** is a deep learning-based medical imaging system designed to classify various brain pathologies from MRI scans with high precision. Leveraging transfer learning with MobileNetV2, the system achieves **98% accuracy** in distinguishing between 10 distinct classes of brain conditions, including tumors, Alzheimer's disease stages, and stroke subtypes.
+**NeuroScan AI** classifies brain MRI scans as normal or tumorous, and subtypes tumors as meningioma, glioma, or pituitary tumor. It uses transfer learning on MobileNetV2, split across two models rather than one.
 
-## 🧠 Supported Pathologies
-The model classifies MRI scans into the following 10 categories:
+This is a research project. See [Known limitations](#known-limitations) before reading anything into the accuracy numbers — the headline scores are measured on same-source test splits and **do not** reflect performance on scans from elsewhere.
 
-| Category | Classes |
-|----------|---------|
-| **Brain Tumors** | Meningioma, Glioma, Pituitary Tumor |
-| **Alzheimer's Disease** | Mild Demented, Moderate Demented, Non Demented, Very Mild Demented |
-| **Stroke / Vascular** | Haemorrhagic, Ischemic |
-| **Healthy** | Normal |
+## Architecture: two stages, not one
 
-## 🖼️ Input Image Guidelines
-To ensure accurate predictions, input images should ideally match the characteristics of the training data:
+The obvious design is a single 4-way classifier over `normal / meningioma / glioma / pituitary`. That was the original approach here, and it scored 98% while being substantially broken. The reason is worth understanding, because it is easy to reproduce by accident.
 
-| Class | Recommended MRI Type | Recommended View (Orientation) |
-|-------|----------------------|--------------------------------|
-| **Pituitary Tumor** | **T1-weighted (Contrast)** | **Coronal** or **Sagittal** (Best for sella turcica) |
-| **Meningioma** | **T1 (Contrast) or T2** | **Axial** or Coronal |
-| **Glioma** | **T1 (Contrast) or T2** | **Axial** or Coronal |
-| **Mild / Moderate / Very Mild Demented** | **T1-weighted** | **Axial** (Focus on hippocampal atrophy) |
-| **Non Demented** | **T1-weighted** | **Axial** |
-| **Haemorrhagic Stroke** | **CT** or **MRI (DWI/FLAIR)** | **Axial** |
-| **Ischemic Stroke** | **DWI** or **FLAIR** | **Axial** |
-| **Normal** | Any of the above | Any standard medical view |
+Public brain-MRI datasets are usually single-purpose: one dataset provides tumor images, a different one provides healthy images. If you merge them, **the source dataset perfectly predicts the label**. The network then has no reason to learn anatomy — it can separate the classes by whatever incidental artifact distinguishes the two acquisition pipelines. Here the tumor images were uniform 512×512 clinical exports and the normals were heterogeneous web images (modal size 225×225), so the model learned image sharpness.
 
-> **Note:** The model may perform poorly on images with different sequences (e.g., raw T1 without contrast for tumors) or unusual artifacts. Ensure images are cropped to remove skull/background if possible for best results.
+This was measurable. Resizing an external test scan from 512×512 to 225×225 — changing no anatomy whatsoever — more than doubled its accuracy. Augmentation did not fix it: suppressing the resolution cue just moved the model onto field-of-view instead, and suppressing that moved it somewhere else again. The correlation is in the label structure, so no input transform removes it.
 
-## 🚀 Key Features
-*   **High Accuracy**: Achieves **98% test accuracy** on a diverse dataset.
-*   **Efficient Architecture**: Built on **MobileNetV2**, ensuring fast inference times suitable for clinical workflows.
-*   **MPS Acceleration**: Optimized for macOS devices with Metal Performance Shaders (MPS) support for faster training and inference.
-*   **Automated Checkpointing**: Automatically saves the best model during training based on validation metrics.
+The fix is structural. Each stage draws **all of its classes from a single source**, so source cannot predict label within either task:
 
-## 📊 Performance Metrics
-Evaluated on a held-out test set (15% of total data):
+| Stage | Task | Classes | Source |
+|---|---|---|---|
+| 1 | Detection | `Normal`, `tumor` | Br35H (`yes`/`no` from one pipeline) |
+| 2 | Subtyping | `meningioma`, `glioma`, `pituitary tumor` | figshare (Cheng et al.) |
+
+At inference, stage 1 runs first; only images it calls tumorous go on to stage 2.
+
+The two stages deliberately look at different kinds of scan:
+
+| Stage | Question | Scan type | Why |
+|---|---|---|---|
+| 1 | Is there a tumor? | **Plain** T1 / T2 (no contrast) | Healthy people almost never get contrast, so a contrast-trained detector learns "contrast was injected", not "tumor present" |
+| 2 | Which type? | **Contrast** T1 | Every input is already a tumor, so contrast can't leak the label — and enhancement pattern is what distinguishes the types |
+
+## Performance
+
+### Same-source scores (upper bounds)
+
+| Stage | Accuracy on its own held-out split |
+|---|---|
+| 1 — Detection (Br35H) | 98% |
+| 2 — Subtyping (figshare) | 95% |
+
+Both collapse on outside scans. Treat them as ceilings, not estimates.
+
+### Stage 1 on outside scans
+
+Tested on two patients the model never trained on: a normal case ([Radiopaedia rID 37605](https://radiopaedia.org/cases/normal-brain-mri-6)) and a tumor case. Tumor slices are scored **per slice** — only slices where the mass is visible count as tumor, because most slices of a tumor patient don't contain the tumor.
+
+| Test | v1 (Br35H only) | **v5** |
+|---|---|---|
+| Normal patient, axial T1 | 0.59 | **1.00** |
+| Normal patient, sagittal T1 | 0.00 | **1.00** |
+| Normal patient, all slices | 0.56 | **0.96** |
+| Tumor patient, slices with visible mass | 0.87 | **0.74** |
+| Tumor patient, slices with no mass | 0.32 | **1.00** |
+| Br35H test (both classes) | 0.98 | **0.97** |
+
+v1's 0.87 on tumors is not skill — it calls most outside images "tumor", including 44% of the healthy patient. v5 is the first version that is high on the tumor and normal rows **at the same time**, which is the only combination that means it is reading anatomy.
+
+What got there, in order of how much each mattered — each was necessary, none sufficient alone:
+1. **Multi-plane, multi-sequence data** for both classes (Br35H is axial T2 only).
+2. **Per-slice labels.** Labelling every slice of a tumor patient as "tumor" taught the model that healthy-looking anatomy is a tumor.
+3. **No contrast on either side.** With contrast tumors against plain normals, v4 learned to detect contrast and caught 9% of tumors on a plain scan.
+4. **Balanced classes** within the hand-collected data.
+
+### Does stage 1 need more data, or different data?
+
+A learning curve trained stage 1 on 10% → 100% of Br35H and scored it on outside normal scans ([learning_curve.py](learning_curve.py)):
+
+| Br35H images | Br35H accuracy | Outside normal scans |
+|---|---|---|
+| 194 | 0.81 | 0.83 |
+| 974 | 0.97 | 0.63 |
+| 1,949 | 0.99 | 0.56 |
+
+More axial T2 data made the model **worse** on real scans. The gap was coverage — planes and sequences — not volume.
+
+### Stage 2 on outside scans
+
+| Outside images | Correct |
+|---|---|
+| Meningioma, contrast (57 slices) | 68% — rest called glioma |
+| Pituitary mass, sagittal (38) | 50% — rest called meningioma |
+| Pituitary mass, coronal (13) | 100% |
+| **Overall (108)** | **66%** |
+
+Real signal, but far from the 95% same-source figure. Not yet fine-tuned on outside data.
+
+## Known limitations
+
+- **Tiny external test set.** Every outside number above comes from roughly one normal and one tumor patient for stage 1, and about three patients for stage 2. These are encouraging signs, not validated results.
+- **`predict.py` still uses v1 by default.** v5 is better on every outside test so far but hasn't been checked on enough patients to replace it. Use it explicitly with `--detector best_model_detection_v5.pth`.
+- **The two stages need different images.** Stage 1 expects a plain scan; stage 2 expects a contrast scan. `predict.py` currently passes the same image to both.
+- **Stage 2 has no reject option.** It always returns meningioma, glioma or pituitary, so any other tumor — lymphoma, medulloblastoma, ependymoma — gets a confidently wrong label.
+- **Coverage gaps in stage 1 training.** No sagittal T2 normals and no normal infant scans, while several tumor cases are infants — "small head" could become a tumor cue.
+- **Slice labels are not radiologist-reviewed.** Visible-tumor marks were made from thumbnails; subtle lesions may be mislabelled.
+
+## Installation
+
+```bash
+git clone https://github.com/KhoaLaptop/NeuroScan-AI.git
+cd NeuroScan-AI
+pip install -r requirements.txt
+```
+
+## Usage
+
+### Inference
+
+A single image:
+
+```bash
+python predict.py path/to/scan.jpg
+```
+
+A whole folder, searched recursively, with results written to CSV:
+
+```bash
+python predict.py path/to/folder --output predictions.csv
+```
+
+Output reports the stage 1 confidence for every image, plus a stage 2 confidence for anything routed to subtyping:
 
 ```text
-                  precision    recall  f1-score   support
-
-      meningioma       0.93      0.72      0.81       106
-          glioma       0.88      0.98      0.93       214
- pituitary tumor       0.97      0.96      0.96       140
-    MildDemented       0.99      1.00      0.99      1479
-ModerateDemented       1.00      1.00      1.00       979
-     NonDemented       0.99      0.99      0.99      1920
-VeryMildDemented       0.98      0.98      0.98      1680
-    Haemorrhagic       0.83      0.86      0.84        28
-        Ischemic       0.00      0.00      0.00         4
-          Normal       0.89      0.93      0.91        60
-
-        accuracy                           0.98      6610
+Prediction: meningioma
+Detection confidence: 0.9871
+Subtype confidence: 0.9342
 ```
 
-## 🛠️ Installation
+### Training
 
-1.  **Clone the repository:**
-    ```bash
-    git clone https://github.com/KhoaLaptop/NeuroScan-AI.git
-    cd NeuroScan-AI
-    ```
-
-2.  **Install dependencies:**
-    ```bash
-    pip install -r requirements.txt
-    ```
-
-## 💻 Usage
-
-### 1. Inference (Single Image)
-To predict the class of a single MRI image:
+Each stage trains separately:
 
 ```bash
-python predict.py "path/to/image.jpg"
+python main.py --task detection --epochs 25
+python main.py --task subtype --epochs 25
 ```
 
-**Output:**
-```text
-Prediction: VeryMildDemented
-Confidence: 0.9987
-```
+Checkpoints are written to `best_model_detection.pth` and `best_model_subtype.pth`. Training auto-detects CUDA, then Apple MPS, then CPU, and saves whenever validation accuracy improves.
 
-### 2. Training
-To retrain the model from scratch:
+To fine-tune the detector on your own multi-plane data and compare it against the original on held-out patients:
 
 ```bash
-python main.py --epochs 10 --batch_size 32
+NEW_MODEL=best_model_detection_v6.pth python finetune_v2.py
 ```
-*   The script automatically detects macOS and optimizes for MPS (Metal Performance Shaders).
-*   The best model is saved as `best_model.pth`.
 
-### 3. Evaluation
-To evaluate the model on the test set:
+It starts from `best_model_detection.pth`, trains on Br35H plus the hand-collected folders, refuses to run if any test image also appears in training, and prints an old-vs-new table. `learning_curve.py` measures whether more Br35H data helps outside scans.
+
+### Evaluation
 
 ```bash
-python test.py
+python test.py --task detection
+python test.py --task subtype
 ```
 
-## ⚠️ Medical Disclaimer
-**NeuroScan AI is a research tool and is NOT intended for clinical diagnosis.**
-While the model achieves high accuracy, it should not replace professional medical advice, diagnosis, or treatment. Always consult with a qualified healthcare provider for any medical concerns.
+Writes `confusion_matrix_<task>.png` alongside a per-class report.
 
-## 📄 License
-This project is licensed under the MIT License.
+## Adding data
+
+Dataset locations are defined in `TASK_ROOT_DIRS` in [main.py](main.py). Each root directory should contain one folder per class. Recognised folder names:
+
+| Stage | Folder names |
+|---|---|
+| Detection | `Normal` or `no`; `tumor` or `yes` |
+| Subtyping | `meningioma`; `glioma`; `pituitary tumor` or `pituitary` |
+
+Aliases are defined in `TASKS` in [src/dataset.py](src/dataset.py). Folders not listed in the active task's class map are ignored, so a source containing extra classes can be pointed at directly.
+
+For fine-tuning, hand-collected data lives in `Tumor Dataset/` (not committed — see below). Folders are set in `NEW_NORMAL_DIRS` and `TUMOR_DIRS` in [finetune_v2.py](finetune_v2.py); held-out test patients go in `Tumor Dataset/validation/` and are never trained on.
+
+**The one rule that matters:** whatever you add, do not let any acquisition property line up with a class boundary. If every new normal comes from one scanner and every new tumor from another, or all normals are T2 and all tumors are T1, you have rebuilt the original bug in a new dimension. Each source, plane and sequence should appear across *all* classes of the stage it feeds.
+
+Rules that came out of collecting data for stage 1:
+
+- **Label slices, not patients.** Only save slices where the tumor is actually visible. A tumor patient's scan is mostly tumor-free slices.
+- **No contrast for stage 1.** Use plain T1 / T2 on both sides. Contrast belongs to stage 2.
+- **One folder per case and stack**, e.g. `tumor/case_125_glioblastoma/coronal_T2/`. Patient identity is what makes patient-level splits possible; hash filenames from browser downloads lose it.
+- **Count patients, not images.** 200 slices of one brain is one sample.
+
+Radiopaedia cases are licensed CC BY-NC-SA, so `Tumor Dataset/`, `Axial_T1/` and `Sagittal_T1/` are git-ignored rather than redistributed here.
+
+## Medical disclaimer
+
+**NeuroScan AI is a research tool and is NOT intended for clinical diagnosis.** It should not be used to inform medical decisions, and it is not a substitute for professional evaluation. Always consult a qualified healthcare provider.
+
+## Data sources
+
+- [Br35H :: Brain Tumor Detection 2020](https://www.kaggle.com/datasets/ahmedhamada0/brain-tumor-detection) — stage 1
+- [Brain Tumor MRI Dataset](https://www.kaggle.com/datasets/masoudnickparvar/brain-tumor-mri-dataset) (figshare / Cheng et al. component) — stage 2
+- External validation case courtesy of Frank Gaillard, [Radiopaedia.org rID 37605](https://radiopaedia.org/cases/normal-brain-mri-6)
+- Additional fine-tuning and test cases from [Radiopaedia.org](https://radiopaedia.org), including the "1. MRI BRAIN TUMOUR" playlist — CC BY-NC-SA, not redistributed
+
+## License
+
+MIT.
