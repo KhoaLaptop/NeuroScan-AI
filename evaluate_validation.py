@@ -14,28 +14,39 @@ import sys
 
 import torch
 from PIL import Image
+from sklearn.metrics import f1_score, precision_score, recall_score
 
 from finetune_v2 import eval_tf, get_device, images_in, load
 
 D = 'Tumor Dataset'
 # The first held-out tumor patient lives outside validation/; its slice marks are here.
 EXTRA_TUMOR = ('tumor 1 (held-out)', f'{D}/holdout_tumor_slice_labels.csv')
+# shortcut: chosen by looking at these same validation patients; re-pick on a fresh set.
+PATIENT_CUTOFF = 0.10
+
+
+def slice_truth(csv_path):
+    """Visible-tumor slices are 1, marked tumor-free slices 0; 'unsure' slices are left out."""
+    rows = list(csv.DictReader(open(csv_path)))
+    return [r['path'] for r in rows], {r['path']: int(r['mark'] == 'visible') for r in rows if r['mark'] in ('visible', 'none')}
 
 
 def patients():
-    out = []
-    labels = list(csv.DictReader(open(EXTRA_TUMOR[1])))
-    out.append((EXTRA_TUMOR[0], 'tumor', [r['path'] for r in labels],
-                {r['path'] for r in labels if r['mark'] == 'visible'}))
+    paths, truth = slice_truth(EXTRA_TUMOR[1])
+    out = [(EXTRA_TUMOR[0], 'tumor', paths, truth)]
     vdir = f'{D}/validation'
     for name in sorted(os.listdir(vdir)):
         folder = os.path.join(vdir, name)
         if not os.path.isdir(folder):
             continue
-        truth = 'tumor' if 'tumor' in name.lower() else 'normal'
+        kind = 'tumor' if 'tumor' in name.lower() else 'normal'
+        paths = images_in(folder)
         lab = os.path.join(folder, 'slice_labels.csv')
-        visible = {r['path'] for r in csv.DictReader(open(lab)) if r['mark'] == 'visible'} if os.path.exists(lab) else set()
-        out.append((name, truth, images_in(folder), visible))
+        if kind == 'normal':
+            truth = {p: 0 for p in paths}
+        else:
+            truth = slice_truth(lab)[1] if os.path.exists(lab) else {}
+        out.append((name, kind, paths, truth))
     return out
 
 
@@ -44,20 +55,34 @@ def main(specs):
     tf = eval_tf()
     models = {name: load(path, device).eval() for name, path in (s.split('=', 1) for s in specs)}
 
-    print(f'{"patient":28} {"truth":>6} {"n":>4}  ' + '  '.join(f'{m:>16}' for m in models))
-    print(f'{"":28} {"":>6} {"":>4}  ' + '  '.join(f'{"flagged (visible)":>16}' for _ in models))
-    for name, truth, paths, visible in patients():
+    stats = {m: {'st': [], 'sp': [], 'pt': [], 'pp': []} for m in models}
+    print(f'{"patient":40} {"truth":>6} {"n":>4}  ' + '  '.join(f'{m:>16}' for m in models))
+    print(f'{"":40} {"":>6} {"":>4}  ' + '  '.join(f'{"flagged (visible)":>16}' for _ in models))
+    for name, kind, paths, truth in patients():
+        visible = {p for p, t in truth.items() if t == 1}
         cells = []
-        for m in models.values():
+        for mname, m in models.items():
+            s = stats[mname]
             flagged = vis_hit = 0
             for p in paths:
                 with torch.no_grad():
                     tumor = torch.argmax(m(tf(Image.open(p).convert('RGB')).unsqueeze(0).to(device)), 1).item() == 1
                 flagged += tumor
                 vis_hit += tumor and p in visible
+                if p in truth:
+                    s['st'].append(truth[p]); s['sp'].append(int(tumor))
+            s['pt'].append(int(kind == 'tumor')); s['pp'].append(int(flagged / len(paths) >= PATIENT_CUTOFF))
             vis = f' ({vis_hit}/{len(visible)})' if visible else ''
             cells.append(f'{100 * flagged / len(paths):5.0f}%{vis}')
-        print(f'{name:28} {truth:>6} {len(paths):>4}  ' + '  '.join(f'{c:>16}' for c in cells))
+        print(f'{name[:40]:40} {kind:>6} {len(paths):>4}  ' + '  '.join(f'{c:>16}' for c in cells))
+
+    print(f'\n{"":53}' + '  '.join(f'{m:>16}' for m in models))
+    for label, t, p in [('slice F1 (labelled slices)', 'st', 'sp'), (f'patient F1 (cutoff {PATIENT_CUTOFF:.0%})', 'pt', 'pp')]:
+        for metric, fn in [('F1', f1_score), ('precision', precision_score), ('recall', recall_score)]:
+            row = [fn(stats[m][t], stats[m][p], zero_division=0) for m in models]
+            print(f'{label + " " + metric:53}' + '  '.join(f'{v:>16.2f}' for v in row))
+    n = stats[next(iter(models))]
+    print(f'(slice: {sum(n["st"])} tumor / {len(n["st"]) - sum(n["st"])} normal slices; patient: {sum(n["pt"])} tumor / {len(n["pt"]) - sum(n["pt"])} normal)')
 
 
 if __name__ == '__main__':

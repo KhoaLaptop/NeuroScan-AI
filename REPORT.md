@@ -48,6 +48,24 @@ Different contributors, scanners and ages. Numbers are the **% of each patient's
 
 Any patient-level cutoff between about 7% and 45% classifies 5 of 6 correctly. No cutoff catches the neurocytoma, which is flagged less than the healthy infant.
 
+### F1 scores — all 12 validation patients (6 healthy, 6 tumor)
+
+Computed by [evaluate_validation.py](evaluate_validation.py).
+
+| | All 12 patients | Excluding the unfamiliar-scanner patient |
+|---|---|---|
+| **Patient F1** (tumor if ≥10% of slices flagged) | **0.73** (precision 0.80, recall 0.67) | 0.80 (precision 1.00, recall 0.67) |
+| **Slice F1** (38 tumor vs 802 normal slices) | **0.57** (precision 0.48, recall 0.71) | 0.64 (precision 0.57, recall 0.71) |
+
+The headline is the **all-patients** column. The excluded patient is a real healthy brain from a scanner whose images look different from the training data; it is where v7 still raises a false alarm, and it is the kind of scan the model will meet in practice. The second column shows how much of the error comes from that one scanner.
+
+For comparison, all 12 patients: v1 scores patient F1 0.67 / slice F1 0.16, v6 0.73 / 0.42.
+
+Notes:
+- **Slice precision is low mainly because of imbalance.** There are 21 healthy slices for every tumor slice, so v7 clearing 96% of healthy slices still leaves about as many false flags as true ones.
+- **Slice F1 uses only the 2 tumor patients with slice-by-slice marks.** The other 4 count at patient level only.
+- **The 10% cutoff was chosen by looking at these patients**, so the patient F1 is likely a little optimistic.
+
 ### Development validation — 6 patients used while building the model
 
 These were used to compare versions, so the scores below are somewhat optimistic. Tumor rows also show **visible-tumor slices caught**, where slices were marked.
