@@ -6,7 +6,7 @@
 
 **NeuroScan AI** classifies brain MRI scans as normal or tumorous, and subtypes tumors as meningioma, glioma, or pituitary tumor. It uses transfer learning on MobileNetV2, split across two models rather than one.
 
-This is a research project. See [Known limitations](#known-limitations) before reading anything into the accuracy numbers — the headline scores are measured on same-source test splits and **do not** reflect performance on scans from elsewhere.
+This is a research project. The full model report is in [REPORT.md](REPORT.md). See [Known limitations](#known-limitations) before reading anything into the accuracy numbers — the headline scores are measured on same-source test splits and **do not** reflect performance on scans from elsewhere.
 
 ## Architecture: two stages, not one
 
@@ -45,24 +45,16 @@ Both collapse on outside scans. Treat them as ceilings, not estimates.
 
 ### Stage 1 on outside scans
 
-Tested on two patients the model never trained on: a normal case ([Radiopaedia rID 37605](https://radiopaedia.org/cases/normal-brain-mri-6)) and a tumor case. Tumor slices are scored **per slice** — only slices where the mass is visible count as tumor, because most slices of a tumor patient don't contain the tumor.
+**Full results, version history and limitations: [REPORT.md](REPORT.md).**
 
-| Test | v1 (Br35H only) | **v5** |
-|---|---|---|
-| Normal patient, axial T1 | 0.59 | **1.00** |
-| Normal patient, sagittal T1 | 0.00 | **1.00** |
-| Normal patient, all slices | 0.56 | **0.96** |
-| Tumor patient, slices with visible mass | 0.87 | **0.74** |
-| Tumor patient, slices with no mass | 0.32 | **1.00** |
-| Br35H test (both classes) | 0.98 | **0.97** |
+The current detector is **v7**. On 6 fresh patients it was never tuned on (3 healthy, including two children, and 3 tumors), it gets 5 of 6 right at the patient level. It clears every healthy patient and catches the large aggressive tumors, but misses a neurocytoma. v1 flags 24–43% of each healthy patient's slices as tumor; v7 flags at most 6%.
 
-v1's 0.87 on tumors is not skill — it calls most outside images "tumor", including 44% of the healthy patient. v5 is the first version that is high on the tumor and normal rows **at the same time**, which is the only combination that means it is reading anatomy.
-
-What got there, in order of how much each mattered — each was necessary, none sufficient alone:
+What got there — each was necessary, none sufficient alone:
 1. **Multi-plane, multi-sequence data** for both classes (Br35H is axial T2 only).
 2. **Per-slice labels.** Labelling every slice of a tumor patient as "tumor" taught the model that healthy-looking anatomy is a tumor.
 3. **No contrast on either side.** With contrast tumors against plain normals, v4 learned to detect contrast and caught 9% of tumors on a plain scan.
-4. **Balanced classes** within the hand-collected data.
+4. **Every plane and sequence in both classes.** When sagittal T2 appeared only in tumors, v5 learned "sagittal T2 = tumor" and flagged half of healthy T2 scans.
+5. **Strong brightness/contrast augmentation.** v6 called an unfamiliar healthy scanner's images tumor 54% of the time; v7 cut that to 13%.
 
 ### Does stage 1 need more data, or different data?
 
@@ -89,8 +81,8 @@ Real signal, but far from the 95% same-source figure. Not yet fine-tuned on outs
 
 ## Known limitations
 
-- **Tiny external test set.** Every outside number above comes from roughly one normal and one tumor patient for stage 1, and about three patients for stage 2. These are encouraging signs, not validated results.
-- **`predict.py` still uses v1 by default.** v5 is better on every outside test so far but hasn't been checked on enough patients to replace it. Use it explicitly with `--detector best_model_detection_v5.pth`.
+- **Small external test set.** Stage 1 has been tested on 12 outside patients and stage 2 on about three. These are encouraging signs, not validated results.
+- **`predict.py` still uses v1 by default.** v7 is much better on outside scans; use it with `--detector best_model_detection_v7.pth`. It still misses smaller and well-defined tumors.
 - **The two stages need different images.** Stage 1 expects a plain scan; stage 2 expects a contrast scan. `predict.py` currently passes the same image to both.
 - **Stage 2 has no reject option.** It always returns meningioma, glioma or pituitary, so any other tumor — lymphoma, medulloblastoma, ependymoma — gets a confidently wrong label.
 - **Coverage gaps in stage 1 training.** No sagittal T2 normals and no normal infant scans, while several tumor cases are infants — "small head" could become a tumor cue.

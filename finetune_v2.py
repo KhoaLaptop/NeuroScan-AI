@@ -10,6 +10,7 @@ import csv
 import glob
 import hashlib
 import os
+import random
 
 import torch
 import torch.nn as nn
@@ -18,6 +19,7 @@ import torch.optim as optim
 from PIL import Image
 from torch.utils.data import ConcatDataset, DataLoader, Dataset
 from torchvision import transforms
+import torchvision.transforms.functional as TF
 
 from main import TASK_ROOT_DIRS, RandomResolutionJitter
 from src.dataset import UnifiedDataset
@@ -39,7 +41,13 @@ TESTS = [
     ('Axial T1 (validation case)', 'Axial_T1', NORMAL),
     ('Sagittal T1 (validation case)', 'Sagittal_T1', NORMAL),
     ('Full validation case', f'{D}/validation/normal-brain-mri-6', NORMAL),
+    ('Normal patient 2 (all slices)', f'{D}/validation/normal_case_2026-10-14', NORMAL),
+    ('Normal patient 3 (all slices)', f'{D}/validation/normal_case_3', NORMAL),
 ]
+
+
+def random_gamma(img):
+    return TF.adjust_gamma(img, random.uniform(0.6, 1.6))
 
 
 def images_in(folder):
@@ -131,7 +139,12 @@ def main():
         transforms.RandomResizedCrop(224, scale=(0.5, 1.0), ratio=(0.9, 1.1)),
         RandomResolutionJitter(),
         transforms.GaussianBlur(kernel_size=5, sigma=(0.1, 2.0)),
-        transforms.ColorJitter(brightness=0.25, contrast=0.25),
+        # Scanners and exports differ a lot in brightness/contrast; a healthy scan from
+        # an unfamiliar one was being called tumor, so make intensity style useless as a cue.
+        transforms.ColorJitter(brightness=0.5, contrast=0.5),
+        transforms.RandomApply([transforms.Lambda(random_gamma)], p=0.5),
+        transforms.RandomAutocontrast(p=0.3),
+        transforms.RandomEqualize(p=0.3),
         transforms.RandomHorizontalFlip(),
         transforms.RandomRotation(10),
         transforms.ToTensor(),
